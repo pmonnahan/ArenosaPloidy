@@ -1,4 +1,4 @@
-#Population genomics of ploidy-variable A. arenosa
+##Population genomics of ploidy-variable A. arenosa
 
 ----
 ## Introduction
@@ -18,7 +18,5 @@ See Mapping_README.txt for description of scripts used in the creation of a mast
 ## Analysis
 Scripts used in data analysis are contained in two repositories.    Click [here](https://github.com/pmonnahan/ScanTools) for the primary pipeline and [here](https://github.com/pmonnahan/LD) for scripts associated with the LD analysis.
 
-## changelog
-* 17-Feb-2013 re-design
 
 ----
