@@ -1,4 +1,4 @@
-##Population genomics of ploidy-variable A. arenosa
+# Population genomics of ploidy-variable A. arenosa
 
 ----
 ## Introduction
