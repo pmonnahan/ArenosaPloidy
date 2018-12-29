@@ -1,0 +1,134 @@
+---
+title: "Twisst_analysis"
+author: "Patrick Monnahan"
+date: "12/29/2018"
+output: html_document
+---
+
+##Load data and packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+chromNames = 1:8
+weights_files4 = paste0("~/Documents/Research/300/Twisst/CurrentResults/DM_HM_BP_BI.4dg.scf", chromNames,".DP8MIN230MAC2.LDphase.phyml_bionj.Twisst4c.weights.tsv") #Baltic populations
+weights_files3 = paste0("~/Documents/Research/300/Twisst/CurrentResults/DM_HM_BP_BI.4dg.scf", chromNames,".DP8MIN230MAC2.LDphase.phyml_bionj.Twisst3e.weights.tsv") #S. Carpathian populations
+window_data_files = paste0("~/Documents/Research/300/Twisst/CurrentResults/DM_HM_BP_BI.4dg.scf", chromNames,".DP8MIN230MAC2.LDphase.phyml_bionj.data.tsv")
+
+#make list of weight and window data for each chromosme, throwing out windows with NA values
+weights_by_chrom3 = list()
+window_data_by_chrom3 = list()
+
+for (i in 1:length(weights_files3)){
+    weights <- read.table(weights_files3[i], header = T, as.is = T)
+    weights <- weights/apply(weights,1,sum,na.rm=T)
+    good_rows = which(is.na(weights[,1]) == FALSE)
+    weights_by_chrom3[[i]] <- weights[good_rows,]
+    window_data_by_chrom3[[i]] <- read.table(window_data_files[i], header = T, as.is = T)[good_rows,]
+    }
+
+weights_all3=data.frame()
+for(i in 1:8){
+weights_all3=rbind(weights_all3,weights_by_chrom3[[i]])}
+mean_weights3 <- apply(weights_all3, 2, mean)
+
+weights_by_chrom4 = list()
+window_data_by_chrom4 = list()
+
+for (i in 1:length(weights_files4)){
+    weights <- read.table(weights_files4[i], header = T, as.is = T)
+    weights <- weights/apply(weights,1,sum,na.rm=T)
+    good_rows = which(is.na(weights[,1]) == FALSE)
+    weights_by_chrom4[[i]] <- weights[good_rows,]
+    window_data_by_chrom4[[i]] <- read.table(window_data_files[i], header = T, as.is = T)[good_rows,]
+    }
+
+weights_all4=data.frame()
+for(i in 1:8){
+weights_all4=rbind(weights_all4,weights_by_chrom4[[i]])}
+mean_weights4 <- apply(weights_all4, 2, mean)
+
+twisst3=data.frame()
+for (i in 1:8){
+    df=cbind(window_data_by_chrom3[[i]],weights_by_chrom3[[i]])
+    twisst3=rbind(twisst3,df)
+}
+
+twisst4=data.frame()
+for (i in 1:8){
+    df=cbind(window_data_by_chrom4[[i]],weights_by_chrom4[[i]])
+    twisst4=rbind(twisst4,df)
+}
+
+twisst4['data']='4c'
+twisst3['data']='3c'
+twisst4['source']='All'
+twisst3['source']='All'
+
+twisst3$start=as.numeric(twisst3$start)
+twisst3$end=as.numeric(twisst3$end)
+twisst4$start=as.numeric(twisst4$start)
+twisst4$end=as.numeric(twisst4$end)
+
+```
+
+
+```{r}
+
+#Define locations of meiosis outliers
+topoNames = names(weights)
+regions <- matrix(c("scaffold_1",0,0.5e6,220193,225616,
+                    "scaffold_1",9.5e6,10.5e6,9779387,9791542,
+                    "scaffold_2",17e6,18e6,17706052,17715900,
+                    "scaffold_2",12e6,13e6,12427364,12431683,
+                    "scaffold_4",11e6,12e6,11123922,11131646,
+                    "scaffold_4",22.5e6,23.5e6,22845898,22850613,
+                    "scaffold_6", 1.75e6,2.25e6,2001440,2005979
+                    ), ncol=5, byrow=T)
+reg_names=c("PRD3","ZYP1a/b","PDS5","ASY1","SMC3","ASY3","SYN1")
+plot_order = c(1,2,3)
+
+
+# Get the weights for the windows within the meoisis genes
+m_winds3=data.frame()
+for (x in 1:nrow(regions)){
+    df = twisst3[twisst3$scaffold==regions[x,1] & twisst3$start < as.numeric(regions[x,4]) & twisst3$end > as.numeric(regions[x,5]),]
+    m_winds3 = rbind(m_winds3,df)
+}
+m_winds3=rbind(m_winds3,twisst3[twisst3$scaffold=="scaffold_2" & twisst3$topo1 == weights_by_chrom3[[2]]["447",1],]) 
+
+m_winds4=data.frame()
+for (x in 1:nrow(regions)){
+    df = twisst4[twisst4$scaffold==regions[x,1] & twisst4$start < as.numeric(regions[x,4]) & twisst4$end > as.numeric(regions[x,5]),]
+    m_winds4 = rbind(m_winds4,df)
+}
+m_winds4=rbind(m_winds4,twisst4[twisst4$scaffold=="scaffold_2" & twisst4$topo1 == weights_by_chrom4[[2]]["447",1],]) 
+
+m_winds4['data']='4c'
+m_winds3['data']='3c'
+m_winds4['source']='Mei'
+m_winds3['source']='Mei'
+
+#Make master data frame with meosis weights along with all other window weights
+twisst3=rbind(twisst3,m_winds3)
+twisst4=rbind(twisst4,m_winds4)
+twisst=rbind(twisst3,twisst4)
+twisst[twisst$data=="4c",]$data="Baltic"
+twisst[twisst$data=="3c",]$data="S. Carpathians"
+
+m.twisst=melt(twisst[,c("source","data","topo1","topo2","topo3")],id.vars=c("source","data"))
+
+#Plotting command
+ggplot(m.twisst,aes(x=variable,y=value,fill=source))+geom_boxplot(outlier.size=0.5)+theme_bw()+ylab("Weights")+facet_grid(~data)+theme(axis.title.x=element_blank(),axis.text.x=element_text(angle=45,hjust=1,size=14),legend.title=element_blank(),legend.text=element_text(size=14),axis.title.y=element_text(size=14),strip.text.x=element_text(size=14),axis.text.y=element_text(size=12))
+
+```
+
+# Weights are normally distributed for the most part.  
+```{r}
+ggplot(m.twisst, aes(y = data, fill = variable, x = value)) + geom_density_ridges(alpha = 0.5) + facet_grid(~source)
+```
+
+# Significant differences between groups in above plot for both parametric and nonparametric tests
+```{r}
+m.twisst %>% group_by(data, variable) %>% summarize(p.t = t.test(value ~ source)$p.value, stat.t = t.test(value ~ source)$statistic, p.w = wilcox.test(value ~ source)$p.value, stat.w = wilcox.test(value ~ source)$statistic)
+```
+

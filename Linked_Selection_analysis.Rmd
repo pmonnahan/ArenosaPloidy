@@ -1,0 +1,178 @@
+---
+title: "A. arenosa; Linked Selection Analysis"
+author: "Patrick Monnahan"
+date: "7/4/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(sjPlot)
+```
+
+# Import Data
+```{r}
+gd=read.table("~/Documents/Research/300/AccessoryInfo/GeneDensity_WS50.0k.txt",head=T)
+m=read.table("~/Documents/Research/300/AccessoryInfo/Missigness_WS50k_DP8.txt",head=T)
+dg_dxy=read.table("~/Documents/Research/300/GenomeScan/Data/AllPops_WS50k_MS1_4dg_BPM_NewDxy_noGenome.txt",head=T)
+ns=read.table("~/Documents/Research/300/GenomeScan/Data/AllPops_WS50k_MS1_NSyn_BPM_NewDxy_noGenome.txt",head=T)
+dg=read.table("~/Documents/Research/300/GenomeScan/Data/AllPops_4dg_5ind_WS50.0k_MS1_WPM_New.txt",head=T)
+```
+
+
+```{r echo=F} 
+ns$outname=as.character(ns$outname)
+ns['pop1']=substr(ns$outname,1,3)
+ns['pop2']=substr(ns$outname,4,6)
+dg_dxy$outname=as.character(dg_dxy$outname)
+dg_dxy['pop1']=substr(dg_dxy$outname,1,3)
+dg_dxy['pop2']=substr(dg_dxy$outname,4,6)
+pop1=list(unique(ns$pop1))
+pop2=list(unique(ns$pop2))
+pops=append(unlist(pop1),unlist(pop2))
+pops=unique(pops)
+
+summarise_bpm = function(df, pop.list){
+  summary = data.frame()
+  for( i in 1:length(pop.list)){
+    yy=aggregate(dxy~scaff+end,data=df[df$pop1==pop.list[i] | df$pop2==pop.list[i],],mean)
+    yy['pop'] = pop.list[i]
+    summary = rbind(summary, yy)
+  }
+  return(summary)
+}
+
+Ns_dxy = summarise_bpm(ns, pops)
+Dg_dxy = summarise_bpm(dg_dxy, pops)
+
+#MERGE INTO SINGLE DATA FRAME HERE
+data1=merge(Ns_dxy,dg,by=c("scaff","end","pop"))
+data1=merge(data1,gd,by=c("scaff","end"))
+data1=merge(data1,m,by=c("scaff","end"))
+data1=merge(data1,Dg_dxy,by=c("scaff","end","pop"),suffixes = c(".N",".S"))
+
+data1=data1[data1$scaff!='Genome',]
+data1['sqrt_div']=sqrt(data1$Diversity)
+data1$dxy.N=log(data1$dxy.N)
+data1$dxy.N=scale(data1$dxy.N)
+data1$dxy.S=log(data1$dxy.S)
+data1$dxy.S=scale(data1$dxy.S)
+data1['dxy_diff']=data1$dxy.N-data1$dxy.S
+data1['dxy_diff2']=data1$dxy_diff^2
+data1['GDM']=data1$GD * (1-data1$missing)
+data1=data1[!duplicated(data1[,c("pop","scaff","end")]),]
+```
+
+# Model Fitting
+```{r}
+
+data1=data1[data1$num_snps>20,]
+data1$ploidy=as.factor(data1$ploidy)
+data1$pop=as.factor(data1$pop)
+contrasts(data1$ploidy)=contr.poly(2)
+contrasts(data1$pop)=contr.poly(36) 
+
+# Remove all populations with less than 2k windows with > 20 SNPs
+data1=data1[!data1$pop %in% c("WEK","SZI","SNO","KZL","SCH","CHO","ZAP","TZI","RZA"),]
+data2=data1[!data1$pop %in% c("KOW","TBG","STE","LAC","DRA"),]
+data3 = data1[data1$pop %in% c("TKO","TRT","SPI","TRE","VEL","HMI","TRD"),]
+
+# Fit full model
+reg=lmer(sqrt_div ~ dxy_diff*GDM*ploidy*dxy_diff2 + (1|pop),data=data1)
+
+# Fit model with non-significant 3 and 4 order interactions removed
+reg1=lmer(sqrt_div ~ dxy_diff+GDM+ploidy+dxy_diff2 +dxy_diff:GDM+dxy_diff:ploidy+GDM:ploidy+dxy_diff:dxy_diff2+GDM:dxy_diff2+ploidy:dxy_diff2+dxy_diff:GDM:ploidy+(1|pop),data=data1)
+reg2=lmer(sqrt_div ~ dxy_diff+GDM+ploidy+dxy_diff2 +dxy_diff:GDM+dxy_diff:ploidy+GDM:ploidy+dxy_diff:dxy_diff2+GDM:dxy_diff2+ploidy:dxy_diff2+dxy_diff:GDM:ploidy+(1|pop),data=data2)
+reg3=lmer(sqrt_div ~ dxy_diff+GDM+ploidy+dxy_diff2 +dxy_diff:GDM+dxy_diff:ploidy+GDM:ploidy+dxy_diff:dxy_diff2+GDM:dxy_diff2+ploidy:dxy_diff2+dxy_diff:GDM:ploidy+(1|pop),data=data3)
+
+# Calculate significane using type 3 sums of squares
+Anova(reg1,type="III")
+
+tab_model(reg1,pred.labels=c("E-NS","GDM","Ploidy","E-NS^2","E-NS * GDM","E-NS * Ploidy","GDM * Ploidy","E-NS * E-NS^2","GDM * E-NS^2", "Ploidy * E-NS^2", "E-NS * Ploidy * GDM"), show.intercept = F, dv.labels = "sqrt[4dg-Diversity]", show.ci = F, show.icc=F, show.re.var = F)
+
+tab_model(reg2,pred.labels=c("E-NS","GDM","Ploidy","E-NS^2","E-NS * GDM","E-NS * Ploidy","GDM * Ploidy","E-NS * E-NS^2","GDM * E-NS^2", "Ploidy * E-NS^2", "E-NS * Ploidy * GDM"), show.intercept = F, dv.labels = "sqrt[4dg-Diversity]", show.ci = F, show.icc=F, show.re.var = F)
+
+tab_model(reg3,pred.labels=c("E-NS","GDM","Ploidy","E-NS^2","E-NS * GDM","E-NS * Ploidy","GDM * Ploidy","E-NS * E-NS^2","GDM * E-NS^2", "Ploidy * E-NS^2", "E-NS * Ploidy * GDM"), show.intercept = F, dv.labels = "sqrt[4dg-Diversity]", show.ci = F, show.icc=F, show.re.var = F)
+```
+
+# Plot Data
+```{r}
+
+tets=data1[data1$ploidy==4,]
+dips=data1[data1$ploidy==2,]
+
+all.plot=ggplot()+geom_point(data=tets,aes(x=dxy_diff,y=sqrt_div,group=pop,color="blue",size=GDM),alpha=0.2)+geom_point(data=dips,aes(x=dxy_diff,y=sqrt_div,group=pop,color="red",size=GDM),alpha=0.2)+geom_smooth(data=tets,aes(x=dxy_diff,y=sqrt_div),method="lm",formula=y ~ x + I(x^2),color="black",se=F)+geom_smooth(data=dips,aes(x=dxy_diff,y=sqrt_div),method="lm",formula=y ~ x + I(x^2),linetype="dashed",color="black",se=F)+ylab("4dg Diversity")+scale_colour_manual(guide=FALSE,name = 'Ploidy',values =c('red'='red','blue'='blue'), labels = c('2','4'))+xlab("Dxy.N - Dxy.S")+scale_size_continuous(guide=FALSE)+theme_bw()+theme(axis.title.x=element_text(size=16),axis.title.y=element_text(size=16),axis.text.x=element_text(size=14),axis.text.y=element_text(size=14),plot.title=element_text(size=16),legend.justification=c(0.9,0.9),legend.position=c(0.9,0.9),legend.title=element_text(size=16),legend.text=element_text(size=14))
+
+high.gdm=ggplot()+geom_point(data=tets[tets$GDM > quantile(tets$GDM,0.9),],aes(x=dxy_diff,y=sqrt_div,group=pop,color="blue"),alpha=0.2)+geom_point(data=dips[dips$GDM > quantile(tets$GDM,0.9),],aes(x=dxy_diff,y=sqrt_div,group=pop,color="red"),alpha=0.2)+geom_smooth(data=tets[tets$GDM > quantile(tets$GDM,0.9),],aes(x=dxy_diff,y=sqrt_div),method="lm",color="black",se=F)+geom_smooth(data=dips[dips$GDM > quantile(tets$GDM,0.9),],aes(x=dxy_diff,y=sqrt_div),method="lm",linetype="dashed",color="black",se=F)+ylab("4dg Diversity")+scale_colour_manual(guide=FALSE,name = 'Ploidy',values =c('red'='red','blue'='blue'), labels = c('2','4'))+xlab("Dxy.N - Dxy.S")+theme_bw()+theme(axis.title.x=element_text(size=16),axis.title.y=element_text(size=16),axis.text.x=element_text(size=14),axis.text.y=element_text(size=14),plot.title=element_text(size=16),legend.justification=c(0.9,0.9),legend.position=c(0.9,0.9),legend.title=element_text(size=16),legend.text=element_text(size=14))
+
+less.gdm=ggplot()+geom_point(data=tets[tets$GDM < quantile(tets$GDM,0.2),],aes(x=dxy_diff,y=sqrt_div,group=pop,color="blue"),alpha=0.2)+geom_point(data=dips[dips$GDM < quantile(tets$GDM,0.2),],aes(x=dxy_diff,y=sqrt_div,group=pop,color="red"),alpha=0.2)+geom_smooth(data=tets[tets$GDM < quantile(tets$GDM,0.2),],aes(x=dxy_diff,y=sqrt_div),method="lm",color="black",se=F)+geom_smooth(data=dips[dips$GDM < quantile(tets$GDM,0.2),],aes(x=dxy_diff,y=sqrt_div),method="lm",linetype="dashed",color="black",se=F)+ylab("4dg Diversity")+scale_colour_manual(guide=FALSE,name = 'Ploidy',values =c('red'='red','blue'='blue'), labels = c('2','4'))+xlab("Dxy.N - Dxy.S")+theme_bw()+theme(axis.title.x=element_text(size=16),axis.title.y=element_text(size=16),axis.text.x=element_text(size=14),axis.text.y=element_text(size=14),plot.title=element_text(size=16),legend.justification=c(0.9,0.9),legend.position=c(0.9,0.9),legend.title=element_text(size=16),legend.text=element_text(size=14))
+```
+
+# LD plot
+```{r}
+ld.t=read.table("~/Documents/Research/300/LD/All.Tets.DownSample.R2.txt",head=T)
+ld.d=read.table("~/Documents/Research/300/LD/All.DownSample.R2.txt",head=T)
+ld=rbind(ld.t,ld.d)
+ld$Ploidy=as.factor(ld$Ploidy)
+LD = ld %>% group_by(Ploidy,End) %>% summarise(R2=mean(R2)) %>% as.data.frame()
+
+oldNames=c("V1","V2","V3","V4","V5","V6")
+newNames=c("Population","Ploidy","Start","End","R2","R22")
+setnames(msld, old = oldNames, new = newNames)
+MSLD = msld %>% group_by(Ploidy,End) %>% summarise(R2=mean(R2,na.rm=T)) %>% as.data.frame()
+ld.plot=ggplot()+geom_line(data=msld,aes(x=End/1000,y=R2,color=Ploidy,group=Population),alpha=0.05)+geom_line(data=MSLD,aes(x=End/1000,y=R2,linetype=Ploidy),size=1.25,color="black")+scale_x_log10()+scale_color_manual(values=c("red","blue"),guide=FALSE) + scale_linetype_manual(guide=FALSE,values=c("dashed","solid"))+ylab("Average Squared Genotypic Correlation")+xlab("Distance (kb)") + theme_bw() + theme(axis.title.x=element_text(size=16),axis.title.y=element_text(size=16),axis.text.x=element_text(size=14),axis.text.y=element_text(size=14))
+
+ld.plot=ggplot()+geom_line(data=ld,aes(x=End/1000,y=R2,color=Ploidy,group=Population),alpha=0.4)+geom_line(data=LD,aes(x=End/1000,y=R2,linetype=Ploidy),size=1.25,color="black")+scale_x_log10()+scale_color_manual(values=c("red","blue"),guide=FALSE) + scale_linetype_manual(guide=FALSE,values=c("dashed","solid"))+ylab("Average Squared Genotypic Correlation")+xlab("Distance (kb)") + theme_bw() + theme(axis.title.x=element_text(size=16),axis.title.y=element_text(size=16),axis.text.x=element_text(size=14),axis.text.y=element_text(size=14))
+
+```
+
+Response regarding multi-nucleotide substitutions (Venkat et al 2018)
+```{r}
+dip.pos = read.table("~/Documents/Research/300/LD/LD_Decay_Diploids/all_dip_positions.txt")
+tet.pos = read.table("~/Documents/Research/300/LD/LD_Decay_Tets/all_tet_positions.txt")
+dip.diff = data.frame(diff(as.matrix(dip.pos$V1)))
+tet.diff = data.frame(diff(as.matrix(tet.pos$V1)))
+table(tet.diff$diff.as.matrix.tet.pos.V1..)
+table(dip.diff$diff.as.matrix.dip.pos.V1..)
+
+dip.adj.prob = 72627 / 1662533
+
+tet.adj.prob = 198307 / 3735331
+
+1.96*((dip.adj.prob * (1-dip.adj.prob))/nrow(dip.diff))^0.5
+```
+
+make supplemental ld plot with msprime output. 
+a =  1x10-8 for mu 1x10-8 for r
+b = 2x10-8 for mu 1x10-8 for r
+c =  1x10-8 for mu 2x10-8 for r
+d =  1x10-8 for mu 4x10-6 for r
+e =  4x10-8 for mu 1x10-8 for r
+```{r}
+msld = read.table("~/Documents/Research/300/LD/ms_sims/ms_sims_avgR2.txt")
+oldNames=c("V1","V2","V3","V4","V5","V6","V7")
+newNames=c("params","rep","Ploidy","Start","End","R2","R22")
+setnames(msld, old = oldNames, new = newNames)
+msld$rep=as.factor(msld$rep)
+msld$Ploidy=as.factor(msld$Ploidy)
+msld['id']=paste(msld$params,msld$rep,msld$Ploidy)
+
+MSLD = msld %>% group_by(params,Ploidy,End) %>% summarise(meanR2=mean(R2,na.rm=T), maxR2=quantile(R2,0.75), minR2=quantile(R2,0.25)) %>% as.data.frame()
+
+ggplot(MSLD, aes(x=End,y=R2,color=Ploidy,linetype=params))+geom_line()
+
+ld.plot=ggplot() + geom_line(data = msld, aes(x = End/1000, y = R2, color = Ploidy, group = Population), alpha = 0.05) + geom_line(data = MSLD, aes(x = End/1000, y = R2, linetype = Ploidy), size = 1.25, color = "black") + scale_x_log10() + scale_color_manual(values = c("red", "blue"), guide=FALSE) + scale_linetype_manual(guide = FALSE, values = c("dashed", "solid")) + ylab("Average Squared Genotypic Correlation") + xlab("Distance (kb)") + theme_bw() + theme(axis.title.x = element_text(size=16), axis.title.y = element_text(size=16), axis.text.x = element_text(size=14), axis.text.y = element_text(size=14))
+
+ggplot() + geom_line(data = MSLD[MSLD$params %in% c("a", "c", "d"),], aes(x=End/1000, y=minR2,color = Ploidy, linetype=params)) + geom_line(data = MSLD[MSLD$params %in% c("a", "c", "d"),], aes(x = End/1000, y = maxR2, color = Ploidy, linetype = params)) + scale_x_log10() + scale_color_manual(values = c("red", "blue")) + scale_linetype_discrete(name = "Recomb. rate", labels = c(expression(paste("1 x 10"^"-8")), expression(paste("2 x 10"^"-8")), expression(paste("4 x 10"^"-8")))) + xlab("Distance (kb)") + ylab("Avg. Genotypic Correlation") + theme_bw() + theme(axis.title.x = element_text(size=16), axis.title.y = element_text(size=16), axis.text.x = element_text(size=14), axis.text.y = element_text(size=14), legend.title = element_text(size=16), legend.text = element_text(size=14))
+
+ggplot(msld[msld$params %in% c("a","b","e"),], aes(y = R2, x = as.factor(End), fill = params)) + geom_boxplot() 
+
+ggplot(MSLD[MSLD$params %in% c("a","b","e"),], aes(y = meanR2, x = End/1000, color = Ploidy, linetype = params)) + geom_line() + scale_color_manual(values = c("red", "blue")) + scale_linetype_discrete(name = "Mutation rate", labels = c(expression(paste("1 x 10"^"-8")), expression(paste("2 x 10"^"-8")), expression(paste("4 x 10"^"-8")))) + xlab("Distance (kb)") + ylab("Avg. Genotypic Correlation") + scale_x_log10() + theme_bw() + theme(axis.title.x = element_text(size=16), axis.title.y = element_text(size=16), axis.text.x = element_text(size=14), axis.text.y = element_text(size=14), legend.title = element_text(size=16), legend.text = element_text(size=14))
+
+ggplot(MSLD[MSLD$params %in% c("a","c","f","g"),], aes(y = meanR2, x = End/1000, color = Ploidy, shape = params)) + geom_point(position = position_dodge(width = 0.3)) + scale_color_manual(values = c("red", "blue")) + scale_shape_discrete(name = "Parameters", labels = c(expression(paste("r = 1 x 10"^"-8","; Ne = 100k")), expression(paste("r = 2 x 10"^"-8","; Ne = 100k")), expression(paste("r = 1 x 10"^"-8","; Ne = 200k")), expression(paste("r = 2 x 10"^"-8","; Ne = 200k")))) + xlab("Distance (kb)") + ylab("Avg. Genotypic Correlation") + scale_x_log10() + theme_bw() + theme(axis.title.x = element_text(size=16), axis.title.y = element_text(size=16), axis.text.x = element_text(size=14), axis.text.y = element_text(size=14), legend.title = element_text(size=16), legend.text = element_text(size=14))
+```
+
+
